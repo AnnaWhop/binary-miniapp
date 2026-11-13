@@ -41,6 +41,7 @@
   .chg{font-size:13px;font-weight:700}
   .src{margin-left:auto;font-size:11px;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);padding:4px 9px;border-radius:999px}
   .src::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
+  .rtag{margin-left:6px;font-size:10px;font-weight:700;color:#b45309;background:#fef3c7;border:1px solid #fde68a;padding:1px 6px;border-radius:999px;vertical-align:2px}
   .src.rep{color:#b45309;background:#fef3c7;border-color:#fde68a} .src.rep::before{background:#f59e0b}
   .src.on{color:var(--up)} .src.on::before{background:var(--up);box-shadow:0 0 6px var(--up)}
 
@@ -170,13 +171,17 @@
     ['ETC','#328332',27],['XLM','#14b6e7',0.4],['ICP','#29abe2',10],['INJ','#00f2fe',25],
     ['AAVE','#b6509e',300],['WIF','#c69c6d',2.5],
   ];
+  const REPLAY_SRC = ['NEAR'];   // монеты, которые показываются с задержкой
   const decFor = p => p>=100?2 : p>=1?3 : p>=0.01?5 : 8;
   const ASSETS = [
-    ...COINS.map(([id,color,start])=>({id, sym:id+'USDT', name:id+'/USD', color, start, vol:0.0005, dec:decFor(start), payout:0.85, cat:'crypto'})),
+    ...COINS.flatMap(([id,color,start])=>{
+      const a={id, sym:id+'USDT', name:id+'/USD', color, start, vol:0.0005, dec:decFor(start), payout:0.85, cat:'crypto'};
+      if(!REPLAY_SRC.includes(id)) return [a];
+      // источник скрыт из списка; вместо него — тот же актив с задержкой и пометкой «Повтор»
+      return [{...a, hidden:true}, {id:id+'R', src:id, name:id+'/USD', color, start, vol:0, dec:a.dec, payout:0.85, cat:'crypto', replay:true, delay:120000}];
+    }),
     {id:'EUR', sym:'EURUSDT',  name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:4, payout:0.82, cat:'fx'},
     {id:'XAU', sym:'PAXGUSDT', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80, cat:'fx'},
-    // Повтор: настоящий график NEAR с задержкой. Подписан меткой, сделки считаются по этой же записи.
-    {id:'NEARR', src:'NEAR', name:'NEAR/USD', color:'#00c08b', start:5.5, vol:0, dec:3, payout:0.85, cat:'replay', delay:120000},
   ];
   const REPLAY_MIN = 2;
   const REST = 'https://data-api.binance.vision/api/v3/klines';
@@ -198,7 +203,7 @@
   // буфер цен источника для повтора (последние ~10 минут)
   S.buf = {};
   function buildReplaySeries(){
-    ASSETS.filter(a=>a.cat==='replay').forEach(a=>{
+    ASSETS.filter(a=>a.replay).forEach(a=>{
       const now=Date.now(); a.dec = ASSETS.find(x=>x.id===a.src).dec;
       S.series[a.id] = Array.from({length:HISTORY_POINTS},(_,i)=>{ const t=now-a.delay-(HISTORY_POINTS-1-i)*TICK_MS; return {t,p:priceAt(a.src,t)}; });
     });
@@ -209,7 +214,7 @@
     while(lo<hi){ const m=(lo+hi+1)>>1; if(b[m].t<=t) lo=m; else hi=m-1; }
     return b[lo].p;
   }
-  ASSETS.filter(a=>a.cat==='replay').forEach(a=>{
+  ASSETS.filter(a=>a.replay).forEach(a=>{
     // в режиме симуляции: прошлое источника достраиваем, чтобы хватило на задержку
     const src=S.series[a.src], need=Math.ceil(a.delay/TICK_MS), pre=[]; let p=src[0].p;
     for(let i=need;i>0;i--){ p=step(p,ASSETS.find(x=>x.id===a.src)); pre.push({t:src[0].t-i*TICK_MS,p}); }
@@ -348,12 +353,12 @@
   function setSource(live){ S.live=live; renderSrc(); }
   function renderSrc(){
     const el=$('src'); if(!el) return;
-    if(S.asset.cat==='replay'){ el.textContent='Повтор −'+REPLAY_MIN+' мин'; el.className='src rep'; return; }
+    if(S.asset.replay){ el.textContent='Повтор −'+REPLAY_MIN+' мин'; el.className='src rep'; return; }
     el.textContent = S.live ? 'Binance LIVE' : 'Симуляция';
     el.className = 'src '+(S.live?'on':'');
   }
   async function loadHistory(){
-    const res = await Promise.allSettled(ASSETS.filter(a=>a.cat!=='replay').map(async a=>{
+    const res = await Promise.allSettled(ASSETS.filter(a=>!a.replay).map(async a=>{
       if(ASSETS.some(r=>r.src===a.id)){
         const rb = await fetch(`${REST}?symbol=${a.sym}&interval=1s&limit=600`);
         if(rb.ok){ S.buf[a.id] = (await rb.json()).map(c=>({t:c[6], p:+c[4]})); }
@@ -400,7 +405,7 @@
     const now=Date.now();
     ASSETS.forEach(a=>{
       const arr=S.series[a.id], prev=arr[arr.length-1].p;
-      if(a.cat==='replay'){ arr.push({t:now,p:priceAt(a.src,now-a.delay)}); if(arr.length>HISTORY_POINTS) arr.shift(); return; }
+      if(a.replay){ arr.push({t:now,p:priceAt(a.src,now-a.delay)}); if(arr.length>HISTORY_POINTS) arr.shift(); return; }
       const p = (S.live && a.live && S.livePrice[a.id]) ? S.livePrice[a.id] : step(prev,a);
       if(!(S.live && a.live)) S.livePrice[a.id]=p;
       arr.push({t:now,p}); if(arr.length>HISTORY_POINTS) arr.shift();
@@ -420,16 +425,15 @@
   function openSheet(o){ $('sheet').classList.toggle('open',o); $('sheetBg').style.display=o?'block':'none'; }
   function renderAssetList(){
     const q=$('assetSearch').value.trim().toLowerCase();
-    const items=ASSETS.filter(a=>!q || a.name.toLowerCase().includes(q));
+    const items=ASSETS.filter(a=>!a.hidden && (!q || a.name.toLowerCase().includes(q)));
     const row=a=>{ const p=last(a.id), arr=S.series[a.id], d=(p-arr[0].p)/arr[0].p*100;
       return `<div class="opt ${a===S.asset?'on':''}" data-id="${a.id}">
       <span class="cico" style="background:${a.color}">${a.id.slice(0,a.id.length>3?2:1)}</span>
-      <span class="n">${a.name}<div class="sub">${fmtP(p,a)} <span class="${d>=0?'win':'lose'}">${d>=0?'+':''}${d.toFixed(2)}%</span></div></span>
+      <span class="n">${a.name}${a.replay?'<span class="rtag">Повтор</span>':''}<div class="sub">${fmtP(p,a)} <span class="${d>=0?'win':'lose'}">${d>=0?'+':''}${d.toFixed(2)}%</span></div></span>
       <span class="p">${Math.round(a.payout*100)}%</span></div>`; };
-    const cr=items.filter(a=>a.cat==='crypto'), fx=items.filter(a=>a.cat==='fx'), rp=items.filter(a=>a.cat==='replay');
+    const cr=items.filter(a=>a.cat==='crypto'), fx=items.filter(a=>a.cat==='fx');
     $('assetList').innerHTML = (cr.length?'<div class="grp">Криптовалюты</div>'+cr.map(row).join(''):'')
       + (fx.length?'<div class="grp">Валюты и металлы</div>'+fx.map(row).join(''):'')
-      + (rp.length?'<div class="grp">Повтор · тренировка (−'+REPLAY_MIN+' мин)</div>'+rp.map(row).join(''):'')
       || '<div class="empty">Ничего не найдено</div>';
     document.querySelectorAll('.opt').forEach(o=>o.onclick=()=>{ S.asset=ASSETS.find(a=>a.id===o.dataset.id); openSheet(false); renderTop(); renderPrice(); });
   }
