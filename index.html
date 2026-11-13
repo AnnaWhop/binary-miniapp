@@ -176,7 +176,7 @@
     {id:'EUR', sym:'EURUSDT',  name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:4, payout:0.82, cat:'fx'},
     {id:'XAU', sym:'PAXGUSDT', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80, cat:'fx'},
     // Повтор: настоящий график BTC с задержкой. Явно подписан, сделки считаются по этой же записи.
-    {id:'BTCR', src:'BTC', name:'BTC/USD · Повтор', color:'#f59e0b', start:96500, vol:0, dec:2, payout:0.85, cat:'replay', delay:120000},
+    {id:'BTCR', src:'BTC', name:'BTC/USD', color:'#f59e0b', start:96500, vol:0, dec:2, payout:0.85, cat:'replay', delay:120000},
   ];
   const REPLAY_MIN = 2;
   const REST = 'https://data-api.binance.vision/api/v3/klines';
@@ -312,10 +312,6 @@
       ctx.fillText((t.dir==='up'?'▲ ':'▼ ')+'$'+t.amount+' · '+left+'с',8,yy-6);
     });
 
-    if(a.cat==='replay'){
-      ctx.font='bold 11px Inter,sans-serif'; ctx.fillStyle='rgba(245,158,11,.14)'; ctx.fillRect(10,10,196,22);
-      ctx.fillStyle='#b45309'; ctx.fillText('ЗАПИСЬ · данные '+REPLAY_MIN+' мин назад',18,25);
-    }
     // current price dot + tag
     const lp=arr[arr.length-1].p, ly=y(lp), lx=x(arr.length-1);
     ctx.fillStyle='#6c4cf5'; ctx.beginPath(); ctx.arc(lx,ly,4,0,7); ctx.fill();
