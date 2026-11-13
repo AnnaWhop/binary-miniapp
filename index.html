@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Binary Demo — Telegram Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg:#0f1218; --panel:#171b23; --panel2:#1e2430; --line:#2a3140;
+    --text:#e8ecf3; --muted:#8a93a6; --accent:#3d8bfd;
+    --up:#22c55e; --up-d:#16a34a; --down:#ef4444; --down-d:#dc2626;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{background:#07090c;color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;height:100%}
+  body{display:flex;justify-content:center;align-items:flex-start;padding:16px 0}
+  .phone{width:390px;max-width:100%;min-height:780px;background:var(--bg);border-radius:28px;overflow:hidden;
+    box-shadow:0 0 0 1px #222a36,0 20px 60px rgba(0,0,0,.6);display:flex;flex-direction:column;position:relative}
+  @media (max-width:430px){body{padding:0}.phone{border-radius:0;min-height:100vh;box-shadow:none}}
+
+  /* Telegram header imitation */
+  .tg-head{display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .tg-head .close{color:var(--accent);font-size:15px}
+  .tg-head .title{flex:1;text-align:center;font-weight:600;font-size:15px}
+  .tg-head .title small{display:block;color:var(--muted);font-weight:400;font-size:11px}
+  .tg-head .dots{color:var(--accent);font-size:18px;letter-spacing:1px}
+
+  .top{display:flex;justify-content:space-between;align-items:center;padding:12px 14px}
+  .asset-btn{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    padding:8px 12px;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer}
+  .asset-btn .ico{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff}
+  .asset-btn .pct{color:var(--up);font-size:12px;font-weight:600}
+  .balance{text-align:right}
+  .balance .lbl{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;justify-content:flex-end}
+  .badge{background:#3d8bfd22;color:var(--accent);padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700}
+  .balance .val{font-size:18px;font-weight:700}
+
+  .price-row{padding:0 14px 6px;display:flex;align-items:baseline;gap:10px}
+  .price{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+  .chg{font-size:13px;font-weight:600}
+
+  .chart-wrap{position:relative;margin:0 8px;height:300px;background:linear-gradient(#141821,#10141b);border-radius:14px;border:1px solid var(--line);overflow:hidden}
+  canvas{width:100%;height:100%;display:block}
+
+  .controls{padding:12px 14px 6px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .ctl{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+  .ctl .lbl{font-size:11px;color:var(--muted);margin-bottom:4px}
+  .stepper{display:flex;align-items:center;justify-content:space-between}
+  .stepper button{width:30px;height:30px;border-radius:8px;border:none;background:#2a3242;color:var(--text);font-size:18px;cursor:pointer}
+  .stepper .v{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+  .payout{grid-column:1/-1;display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:0 2px}
+  .payout b{color:var(--up)}
+
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:6px 14px 12px}
+  .act{border:none;border-radius:14px;padding:14px 0;font-size:16px;font-weight:700;color:#fff;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;transition:transform .08s}
+  .act:active{transform:scale(.97)}
+  .act small{font-weight:500;font-size:11px;opacity:.85}
+  .act.up{background:linear-gradient(var(--up),var(--up-d))}
+  .act.down{background:linear-gradient(var(--down),var(--down-d))}
+
+  .tabs{display:flex;gap:4px;margin:0 14px;background:var(--panel);padding:4px;border-radius:12px}
+  .tabs button{flex:1;border:none;background:none;color:var(--muted);padding:8px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer}
+  .tabs button.on{background:var(--panel2);color:var(--text)}
+  .list{padding:10px 14px 18px;display:flex;flex-direction:column;gap:8px;flex:1}
+  .empty{color:var(--muted);font-size:13px;text-align:center;padding:18px 0}
+  .trade{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .trade .dir{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:800}
+  .trade .dir.u{background:#22c55e22;color:var(--up)} .trade .dir.d{background:#ef444422;color:var(--down)}
+  .trade .info{flex:1;font-size:13px}
+  .trade .info .s{color:var(--muted);font-size:11px;margin-top:2px}
+  .trade .res{text-align:right;font-weight:700;font-size:14px;font-variant-numeric:tabular-nums}
+  .trade .res .s{color:var(--muted);font-weight:500;font-size:11px}
+  .win{color:var(--up)} .lose{color:var(--down)}
+
+  /* sheet */
+  .sheet-bg{position:absolute;inset:0;background:rgba(0,0,0,.5);display:none;z-index:10}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--panel);border-radius:20px 20px 0 0;padding:14px;z-index:11;transform:translateY(100%);transition:transform .2s}
+  .sheet.open{transform:none}
+  .sheet h3{font-size:15px;margin-bottom:10px;text-align:center}
+  .opt{display:flex;align-items:center;gap:10px;padding:12px;border-radius:12px;cursor:pointer}
+  .opt:hover,.opt.on{background:var(--panel2)}
+  .opt .n{flex:1;font-weight:600}
+  .opt .p{color:var(--up);font-weight:600;font-size:13px}
+
+  .toast{position:absolute;left:50%;top:70px;transform:translateX(-50%) translateY(-20px);opacity:0;background:var(--panel2);border:1px solid var(--line);
+    padding:10px 16px;border-radius:12px;font-size:14px;font-weight:600;z-index:20;transition:.25s;white-space:nowrap;pointer-events:none}
+  .toast.show{opacity:1;transform:translateX(-50%)}
+</style>
+</head>
+<body>
+<div class="phone" id="app">
+  <div class="tg-head">
+    <span class="close">Закрыть</span>
+    <div class="title">Binary Demo<small>мини-приложение</small></div>
+    <span class="dots">···</span>
+  </div>
+
+  <div class="top">
+    <button class="asset-btn" id="assetBtn">
+      <span class="ico" id="assetIco"></span><span id="assetName"></span>
+      <span class="pct" id="assetPayout"></span> ▾
+    </button>
+    <div class="balance">
+      <div class="lbl"><span class="badge">DEMO</span>Баланс</div>
+      <div class="val" id="balance">$10 000.00</div>
+    </div>
+  </div>
+
+  <div class="price-row">
+    <div class="price" id="price">—</div>
+    <div class="chg" id="chg"></div>
+  </div>
+
+  <div class="chart-wrap"><canvas id="chart"></canvas></div>
+
+  <div class="controls">
+    <div class="ctl">
+      <div class="lbl">Сумма</div>
+      <div class="stepper"><button data-a="-">−</button><span class="v" id="amount">$100</span><button data-a="+">+</button></div>
+    </div>
+    <div class="ctl">
+      <div class="lbl">Время</div>
+      <div class="stepper"><button data-t="-">−</button><span class="v" id="time">30 сек</span><button data-t="+">+</button></div>
+    </div>
+    <div class="payout"><span>Доходность</span><span>Выплата: <b id="profit">+$85.00</b></span></div>
+  </div>
+
+  <div class="actions">
+    <button class="act up" id="upBtn">▲ Выше<small>прогноз на рост</small></button>
+    <button class="act down" id="downBtn">▼ Ниже<small>прогноз на падение</small></button>
+  </div>
+
+  <div class="tabs">
+    <button class="on" data-tab="open">Открытые <span id="openCount"></span></button>
+    <button data-tab="hist">История</button>
+  </div>
+  <div class="list" id="list"></div>
+
+  <div class="sheet-bg" id="sheetBg"></div>
+  <div class="sheet" id="sheet"><h3>Выберите актив</h3><div id="assetList"></div></div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(() => {
+  // ---------- Config ----------
+  const ASSETS = [
+    {id:'BTC', name:'BTC/USD', color:'#f7931a', start:96500, vol:0.00035, dec:2, payout:0.85},
+    {id:'ETH', name:'ETH/USD', color:'#627eea', start:3420,  vol:0.0004,  dec:2, payout:0.85},
+    {id:'EUR', name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:5, payout:0.82},
+    {id:'XAU', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80},
+  ];
+  const AMOUNTS = [10,25,50,100,250,500,1000];
+  const TIMES = [15,30,60,120,300];
+  const TICK_MS = 500, HISTORY_POINTS = 240;
+
+  // ---------- State ----------
+  const S = { balance:10000, asset:ASSETS[0], amountIdx:3, timeIdx:1, open:[], hist:[], tab:'open', series:{} };
+
+  // price simulation per asset (random walk with slight mean reversion)
+  ASSETS.forEach(a => {
+    const arr = []; let p = a.start;
+    for (let i=0;i<HISTORY_POINTS;i++){ p = step(p,a); arr.push({t:Date.now()-(HISTORY_POINTS-i)*TICK_MS,p}); }
+    S.series[a.id] = arr;
+  });
+  function step(p,a){ const drift = (a.start-p)/a.start*0.002; return p*(1+drift+(Math.random()-0.5)*2*a.vol); }
+
+  // ---------- Helpers ----------
+  const $ = id => document.getElementById(id);
+  const fmtMoney = v => '$'+v.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}).replace(',', '.');
+  const fmtP = (v,a=S.asset) => v.toLocaleString('en-US',{minimumFractionDigits:a.dec,maximumFractionDigits:a.dec});
+  const fmtT = s => s<60 ? s+' сек' : (s/60)+' мин';
+  const last = id => S.series[id][S.series[id].length-1].p;
+  function haptic(type){ try{ window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(type); }catch(e){} }
+  let toastTimer;
+  function toast(msg,cls){ const t=$('toast'); t.textContent=msg; t.className='toast show '+(cls||''); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.className='toast',2000); }
+
+  // ---------- UI render ----------
+  function renderTop(){
+    const a=S.asset;
+    $('assetIco').style.background=a.color; $('assetIco').textContent=a.id[0];
+    $('assetName').textContent=a.name; $('assetPayout').textContent=Math.round(a.payout*100)+'%';
+    $('balance').textContent=fmtMoney(S.balance);
+    $('amount').textContent='$'+AMOUNTS[S.amountIdx];
+    $('time').textContent=fmtT(TIMES[S.timeIdx]);
+    $('profit').textContent='+'+fmtMoney(AMOUNTS[S.amountIdx]*a.payout);
+  }
+  function renderPrice(){
+    const arr=S.series[S.asset.id], p=arr[arr.length-1].p, p0=arr[0].p, d=(p-p0)/p0*100;
+    $('price').textContent=fmtP(p);
+    $('chg').textContent=(d>=0?'+':'')+d.toFixed(2)+'%';
+    $('chg').className='chg '+(d>=0?'win':'lose');
+  }
+  function renderList(){
+    $('openCount').textContent = S.open.length ? '('+S.open.length+')' : '';
+    const el=$('list'); const now=Date.now();
+    const items = S.tab==='open' ? S.open : S.hist.slice().reverse();
+    if(!items.length){ el.innerHTML='<div class="empty">'+(S.tab==='open'?'Нет открытых сделок. Сделайте прогноз ▲ или ▼':'История пока пуста')+'</div>'; return; }
+    el.innerHTML = items.map(tr=>{
+      const a=ASSETS.find(x=>x.id===tr.asset);
+      const dirCls = tr.dir==='up'?'u':'d', arrow = tr.dir==='up'?'▲':'▼';
+      if(S.tab==='open'){
+        const cur=last(tr.asset), left=Math.max(0,Math.ceil((tr.end-now)/1000));
+        const winning = tr.dir==='up' ? cur>tr.entry : cur<tr.entry;
+        return `<div class="trade"><div class="dir ${dirCls}">${arrow}</div>
+          <div class="info">${a.name} · $${tr.amount}<div class="s">Вход ${fmtP(tr.entry,a)} · сейчас ${fmtP(cur,a)}</div></div>
+          <div class="res ${winning?'win':'lose'}">${winning?'+'+fmtMoney(tr.amount*tr.payout):'−'+fmtMoney(tr.amount)}<div class="s">⏱ ${left} с</div></div></div>`;
+      }
+      return `<div class="trade"><div class="dir ${dirCls}">${arrow}</div>
+        <div class="info">${a.name} · $${tr.amount}<div class="s">${fmtP(tr.entry,a)} → ${fmtP(tr.close,a)} · ${new Date(tr.end).toLocaleTimeString('ru-RU')}</div></div>
+        <div class="res ${tr.win?'win':'lose'}">${tr.win?'+'+fmtMoney(tr.amount*tr.payout):'−'+fmtMoney(tr.amount)}<div class="s">${tr.win?'Выигрыш':'Проигрыш'}</div></div></div>`;
+    }).join('');
+  }
+
+  // ---------- Chart ----------
+  const cv=$('chart'), ctx=cv.getContext('2d');
+  function resize(){ const r=cv.getBoundingClientRect(), d=window.devicePixelRatio||1; cv.width=r.width*d; cv.height=r.height*d; ctx.setTransform(d,0,0,d,0,0); }
+  window.addEventListener('resize',resize);
+  function drawChart(){
+    const W=cv.clientWidth, H=cv.clientHeight, padR=70, padT=16, padB=22;
+    const a=S.asset, arr=S.series[a.id];
+    const opens=S.open.filter(t=>t.asset===a.id);
+    let min=Infinity,max=-Infinity;
+    arr.forEach(o=>{min=Math.min(min,o.p);max=Math.max(max,o.p)});
+    opens.forEach(t=>{min=Math.min(min,t.entry);max=Math.max(max,t.entry)});
+    const pad=(max-min)*0.15||max*0.001; min-=pad; max+=pad;
+    const x=i=>i/(arr.length-1)*(W-padR), y=p=>padT+(1-(p-min)/(max-min))*(H-padT-padB);
+    ctx.clearRect(0,0,W,H);
+
+    // grid + labels
+    ctx.font='10px sans-serif'; ctx.textAlign='left';
+    for(let i=0;i<=4;i++){
+      const p=min+(max-min)*i/4, yy=y(p);
+      ctx.strokeStyle='#222937'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W-padR,yy); ctx.stroke();
+      ctx.fillStyle='#5f6879'; ctx.fillText(fmtP(p),W-padR+6,yy+3);
+    }
+    // area
+    const grad=ctx.createLinearGradient(0,padT,0,H);
+    grad.addColorStop(0,'rgba(61,139,253,.35)'); grad.addColorStop(1,'rgba(61,139,253,0)');
+    ctx.beginPath(); arr.forEach((o,i)=>i?ctx.lineTo(x(i),y(o.p)):ctx.moveTo(x(i),y(o.p)));
+    ctx.lineTo(x(arr.length-1),H); ctx.lineTo(0,H); ctx.closePath(); ctx.fillStyle=grad; ctx.fill();
+    // line
+    ctx.beginPath(); arr.forEach((o,i)=>i?ctx.lineTo(x(i),y(o.p)):ctx.moveTo(x(i),y(o.p)));
+    ctx.strokeStyle='#3d8bfd'; ctx.lineWidth=2; ctx.stroke();
+
+    // open trade lines
+    const now=Date.now(), lastT=arr[arr.length-1].t;
+    opens.forEach(t=>{
+      const yy=y(t.entry), c=t.dir==='up'?'#22c55e':'#ef4444';
+      ctx.setLineDash([5,4]); ctx.strokeStyle=c; ctx.lineWidth=1.2;
+      ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W-padR,yy); ctx.stroke(); ctx.setLineDash([]);
+      // entry marker
+      const idx=arr.findIndex(o=>o.t>=t.start); if(idx>=0){ ctx.fillStyle=c; ctx.beginPath(); ctx.arc(x(idx),yy,4,0,7); ctx.fill(); }
+      // expiry vertical line (if fits in visible future area - shown at right edge with countdown)
+      const left=Math.max(0,Math.ceil((t.end-now)/1000));
+      ctx.fillStyle=c; ctx.fillRect(4,yy-16,74,14);
+      ctx.fillStyle='#fff'; ctx.font='bold 10px sans-serif';
+      ctx.fillText((t.dir==='up'?'▲ ':'▼ ')+'$'+t.amount+' · '+left+'с',8,yy-6);
+    });
+
+    // current price dot + tag
+    const lp=arr[arr.length-1].p, ly=y(lp), lx=x(arr.length-1);
+    ctx.fillStyle='#3d8bfd'; ctx.beginPath(); ctx.arc(lx,ly,4,0,7); ctx.fill();
+    ctx.fillStyle='rgba(61,139,253,.25)'; ctx.beginPath(); ctx.arc(lx,ly,8+Math.sin(now/200)*2,0,7); ctx.fill();
+    ctx.fillStyle='#3d8bfd'; ctx.fillRect(W-padR+1,ly-9,padR-2,18);
+    ctx.fillStyle='#fff'; ctx.font='bold 10px sans-serif'; ctx.fillText(fmtP(lp),W-padR+5,ly+3);
+  }
+  function loop(){ drawChart(); requestAnimationFrame(loop); }
+
+  // ---------- Trading ----------
+  function placeTrade(dir){
+    const amount=AMOUNTS[S.amountIdx];
+    if(amount>S.balance){ toast('Недостаточно средств','lose'); haptic('error'); return; }
+    S.balance-=amount;
+    const now=Date.now(), a=S.asset;
+    S.open.push({id:now+Math.random(), asset:a.id, dir, amount, payout:a.payout, entry:last(a.id), start:now, end:now+TIMES[S.timeIdx]*1000});
+    toast((dir==='up'?'▲ Выше':'▼ Ниже')+' · $'+amount+' на '+fmtT(TIMES[S.timeIdx]));
+    haptic('success'); renderTop(); renderList();
+  }
+  function settle(){
+    const now=Date.now(); let changed=false;
+    S.open = S.open.filter(t=>{
+      if(now<t.end) return true;
+      const close=last(t.asset), win = t.dir==='up' ? close>t.entry : close<t.entry;
+      if(win) S.balance += t.amount + t.amount*t.payout;
+      S.hist.push({...t, close, win}); changed=true;
+      toast(win?('Выигрыш +'+fmtMoney(t.amount*t.payout)):('Проигрыш −'+fmtMoney(t.amount)), win?'win':'lose');
+      haptic(win?'success':'error');
+      return false;
+    });
+    if(changed) renderTop();
+  }
+  function tick(){
+    ASSETS.forEach(a=>{ const arr=S.series[a.id]; arr.push({t:Date.now(),p:step(arr[arr.length-1].p,a)}); if(arr.length>HISTORY_POINTS) arr.shift(); });
+    settle(); renderPrice(); renderList();
+  }
+
+  // ---------- Events ----------
+  document.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{ S.amountIdx=Math.max(0,Math.min(AMOUNTS.length-1,S.amountIdx+(b.dataset.a==='+'?1:-1))); renderTop(); });
+  document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{ S.timeIdx=Math.max(0,Math.min(TIMES.length-1,S.timeIdx+(b.dataset.t==='+'?1:-1))); renderTop(); });
+  $('upBtn').onclick=()=>placeTrade('up');
+  $('downBtn').onclick=()=>placeTrade('down');
+  document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{
+    S.tab=b.dataset.tab; document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('on',x===b)); renderList();
+  });
+  function openSheet(o){ $('sheet').classList.toggle('open',o); $('sheetBg').style.display=o?'block':'none'; }
+  $('assetBtn').onclick=()=>{
+    $('assetList').innerHTML=ASSETS.map(a=>`<div class="opt ${a===S.asset?'on':''}" data-id="${a.id}">
+      <span class="ico" style="width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:${a.color};font-weight:700;font-size:12px">${a.id[0]}</span>
+      <span class="n">${a.name}<div style="color:var(--muted);font-size:12px;font-weight:400">${fmtP(last(a.id),a)}</div></span><span class="p">${Math.round(a.payout*100)}%</span></div>`).join('');
+    document.querySelectorAll('.opt').forEach(o=>o.onclick=()=>{ S.asset=ASSETS.find(a=>a.id===o.dataset.id); openSheet(false); renderTop(); renderPrice(); });
+    openSheet(true);
+  };
+  $('sheetBg').onclick=()=>openSheet(false);
+
+  // Telegram WebApp integration (works when opened inside Telegram)
+  try{ const tg=window.Telegram?.WebApp; if(tg){ tg.ready(); tg.expand(); } }catch(e){}
+
+  // ---------- Start ----------
+  resize(); renderTop(); renderPrice(); renderList(); loop();
+  setInterval(tick,TICK_MS);
+})();
+</script>
+</body>
+</html>
