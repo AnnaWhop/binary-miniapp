@@ -41,6 +41,8 @@
   .chg{font-size:13px;font-weight:700}
   .src{margin-left:auto;font-size:11px;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);padding:4px 9px;border-radius:999px}
   .src::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
+  .src.rep{color:#b45309;background:#fef3c7;border-color:#fde68a} .src.rep::before{background:#f59e0b}
+  .rnote{display:none;margin:8px 12px 0;padding:9px 12px;border-radius:14px;background:#fef3c7;border:1px solid #fde68a;color:#92400e;font-size:12px;font-weight:500;line-height:1.35}
   .src.on{color:var(--up)} .src.on::before{background:var(--up);box-shadow:0 0 6px var(--up)}
 
   .chart-wrap{position:relative;margin:0 12px;height:290px;background:var(--panel);border-radius:20px;border:1px solid var(--line);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}
@@ -125,6 +127,7 @@
   </div>
 
   <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  <div class="rnote" id="replayNote">Режим повтора: показан настоящий график BTC с задержкой 2 минуты. Это тренировка — цена не совпадает с текущим рынком, сделки закрываются по этой же записи.</div>
 
   <div class="controls">
     <div class="ctl">
@@ -174,7 +177,10 @@
     ...COINS.map(([id,color,start])=>({id, sym:id+'USDT', name:id+'/USD', color, start, vol:0.0005, dec:decFor(start), payout:0.85, cat:'crypto'})),
     {id:'EUR', sym:'EURUSDT',  name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:4, payout:0.82, cat:'fx'},
     {id:'XAU', sym:'PAXGUSDT', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80, cat:'fx'},
+    // Повтор: настоящий график BTC с задержкой. Явно подписан, сделки считаются по этой же записи.
+    {id:'BTCR', src:'BTC', name:'BTC/USD · Повтор', color:'#f59e0b', start:96500, vol:0, dec:2, payout:0.85, cat:'replay', delay:120000},
   ];
+  const REPLAY_MIN = 2;
   const REST = 'https://data-api.binance.vision/api/v3/klines';
   const WS   = 'wss://data-stream.binance.vision/stream?streams=';
   const AMOUNTS = [10,25,50,100,250,500,1000];
@@ -191,6 +197,27 @@
     for (let i=0;i<HISTORY_POINTS;i++){ p = step(p,a); arr.push({t:Date.now()-(HISTORY_POINTS-i)*TICK_MS,p}); }
     S.series[a.id] = arr;
   });
+  // буфер цен источника для повтора (последние ~10 минут)
+  S.buf = {};
+  function buildReplaySeries(){
+    ASSETS.filter(a=>a.cat==='replay').forEach(a=>{
+      const now=Date.now();
+      S.series[a.id] = Array.from({length:HISTORY_POINTS},(_,i)=>{ const t=now-a.delay-(HISTORY_POINTS-1-i)*TICK_MS; return {t,p:priceAt(a.src,t)}; });
+    });
+  }
+  function priceAt(src,t){
+    const b=S.buf[src]; if(!b||!b.length) return last(src);
+    let lo=0,hi=b.length-1; if(t<=b[0].t) return b[0].p;
+    while(lo<hi){ const m=(lo+hi+1)>>1; if(b[m].t<=t) lo=m; else hi=m-1; }
+    return b[lo].p;
+  }
+  ASSETS.filter(a=>a.cat==='replay').forEach(a=>{
+    // в режиме симуляции: прошлое источника достраиваем, чтобы хватило на задержку
+    const src=S.series[a.src], need=Math.ceil(a.delay/TICK_MS), pre=[]; let p=src[0].p;
+    for(let i=need;i>0;i--){ p=step(p,ASSETS.find(x=>x.id===a.src)); pre.push({t:src[0].t-i*TICK_MS,p}); }
+    S.buf[a.src]=pre.concat(src.map(o=>({...o})));
+  });
+  buildReplaySeries();
   function step(p,a){ const drift = (a.start-p)/a.start*0.002; return p*(1+drift+(Math.random()-0.5)*2*a.vol); }
 
   // ---------- Helpers ----------
@@ -218,6 +245,8 @@
     $('price').textContent=fmtP(p);
     $('chg').textContent=(d>=0?'+':'')+d.toFixed(2)+'%';
     $('chg').className='chg '+(d>=0?'win':'lose');
+    renderSrc();
+    $('replayNote').style.display = S.asset.cat==='replay' ? 'block' : 'none';
   }
   function renderList(){
     $('openCount').textContent = S.open.length ? '('+S.open.length+')' : '';
@@ -286,6 +315,10 @@
       ctx.fillText((t.dir==='up'?'▲ ':'▼ ')+'$'+t.amount+' · '+left+'с',8,yy-6);
     });
 
+    if(a.cat==='replay'){
+      ctx.font='bold 11px Inter,sans-serif'; ctx.fillStyle='rgba(245,158,11,.14)'; ctx.fillRect(10,10,196,22);
+      ctx.fillStyle='#b45309'; ctx.fillText('ЗАПИСЬ · данные '+REPLAY_MIN+' мин назад',18,25);
+    }
     // current price dot + tag
     const lp=arr[arr.length-1].p, ly=y(lp), lx=x(arr.length-1);
     ctx.fillStyle='#6c4cf5'; ctx.beginPath(); ctx.arc(lx,ly,4,0,7); ctx.fill();
@@ -319,13 +352,19 @@
     if(changed) renderTop();
   }
   // ---------- Live data (Binance) ----------
-  function setSource(live){
-    S.live=live;
-    $('src').textContent = live ? 'Binance LIVE' : 'Симуляция';
-    $('src').className = 'src '+(live?'on':'');
+  function setSource(live){ S.live=live; renderSrc(); }
+  function renderSrc(){
+    const el=$('src'); if(!el) return;
+    if(S.asset.cat==='replay'){ el.textContent='Повтор −'+REPLAY_MIN+' мин'; el.className='src rep'; return; }
+    el.textContent = S.live ? 'Binance LIVE' : 'Симуляция';
+    el.className = 'src '+(S.live?'on':'');
   }
   async function loadHistory(){
-    const res = await Promise.allSettled(ASSETS.map(async a=>{
+    const res = await Promise.allSettled(ASSETS.filter(a=>a.cat!=='replay').map(async a=>{
+      if(ASSETS.some(r=>r.src===a.id)){
+        const rb = await fetch(`${REST}?symbol=${a.sym}&interval=1s&limit=600`);
+        if(rb.ok){ S.buf[a.id] = (await rb.json()).map(c=>({t:c[6], p:+c[4]})); }
+      }
       const r = await fetch(`${REST}?symbol=${a.sym}&interval=1s&limit=${HISTORY_POINTS}`);
       if(!r.ok) throw new Error('http '+r.status);
       const k = await r.json();
@@ -338,6 +377,7 @@
       a.live = true;
     }));
     if(!res.some(r=>r.status==='fulfilled')) throw new Error('no data');
+    buildReplaySeries();
   }
   let ws, retry=0;
   function connectWS(){
@@ -364,11 +404,14 @@
   function tick(){
     // если поток молчит дольше 10с — считаем, что связь пропала
     if(S.live && Date.now()-S.lastMsg>10000) setSource(false);
+    const now=Date.now();
     ASSETS.forEach(a=>{
       const arr=S.series[a.id], prev=arr[arr.length-1].p;
+      if(a.cat==='replay'){ arr.push({t:now,p:priceAt(a.src,now-a.delay)}); if(arr.length>HISTORY_POINTS) arr.shift(); return; }
       const p = (S.live && a.live && S.livePrice[a.id]) ? S.livePrice[a.id] : step(prev,a);
       if(!(S.live && a.live)) S.livePrice[a.id]=p;
-      arr.push({t:Date.now(),p}); if(arr.length>HISTORY_POINTS) arr.shift();
+      arr.push({t:now,p}); if(arr.length>HISTORY_POINTS) arr.shift();
+      const b=S.buf[a.id]; if(b){ b.push({t:now,p}); while(b.length && b[0].t<now-600000) b.shift(); }
     });
     settle(); renderPrice(); renderList();
   }
@@ -390,9 +433,10 @@
       <span class="cico" style="background:${a.color}">${a.id.slice(0,a.id.length>3?2:1)}</span>
       <span class="n">${a.name}<div class="sub">${fmtP(p,a)} <span class="${d>=0?'win':'lose'}">${d>=0?'+':''}${d.toFixed(2)}%</span></div></span>
       <span class="p">${Math.round(a.payout*100)}%</span></div>`; };
-    const cr=items.filter(a=>a.cat==='crypto'), fx=items.filter(a=>a.cat==='fx');
+    const cr=items.filter(a=>a.cat==='crypto'), fx=items.filter(a=>a.cat==='fx'), rp=items.filter(a=>a.cat==='replay');
     $('assetList').innerHTML = (cr.length?'<div class="grp">Криптовалюты</div>'+cr.map(row).join(''):'')
       + (fx.length?'<div class="grp">Валюты и металлы</div>'+fx.map(row).join(''):'')
+      + (rp.length?'<div class="grp">Повтор · тренировка (−'+REPLAY_MIN+' мин)</div>'+rp.map(row).join(''):'')
       || '<div class="empty">Ничего не найдено</div>';
     document.querySelectorAll('.opt').forEach(o=>o.onclick=()=>{ S.asset=ASSETS.find(a=>a.id===o.dataset.id); openSheet(false); renderTop(); renderPrice(); });
   }
