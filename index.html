@@ -175,8 +175,8 @@
     ...COINS.map(([id,color,start])=>({id, sym:id+'USDT', name:id+'/USD', color, start, vol:0.0005, dec:decFor(start), payout:0.85, cat:'crypto'})),
     {id:'EUR', sym:'EURUSDT',  name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:4, payout:0.82, cat:'fx'},
     {id:'XAU', sym:'PAXGUSDT', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80, cat:'fx'},
-    // Повтор: настоящий график BTC с задержкой. Явно подписан, сделки считаются по этой же записи.
-    {id:'BTCR', src:'BTC', name:'BTC/USD', color:'#f59e0b', start:96500, vol:0, dec:2, payout:0.85, cat:'replay', delay:120000},
+    // Повтор: настоящий график NEAR с задержкой. Подписан меткой, сделки считаются по этой же записи.
+    {id:'NEARR', src:'NEAR', name:'NEAR/USD', color:'#00c08b', start:5.5, vol:0, dec:3, payout:0.85, cat:'replay', delay:120000},
   ];
   const REPLAY_MIN = 2;
   const REST = 'https://data-api.binance.vision/api/v3/klines';
@@ -199,7 +199,7 @@
   S.buf = {};
   function buildReplaySeries(){
     ASSETS.filter(a=>a.cat==='replay').forEach(a=>{
-      const now=Date.now();
+      const now=Date.now(); a.dec = ASSETS.find(x=>x.id===a.src).dec;
       S.series[a.id] = Array.from({length:HISTORY_POINTS},(_,i)=>{ const t=now-a.delay-(HISTORY_POINTS-1-i)*TICK_MS; return {t,p:priceAt(a.src,t)}; });
     });
   }
