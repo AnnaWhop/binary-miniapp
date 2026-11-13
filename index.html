@@ -86,6 +86,12 @@
   .opt:hover,.opt.on{background:var(--panel2)}
   .opt .n{flex:1;font-weight:700}
   .opt .p{color:var(--accent);font-weight:700;font-size:13px}
+  .opt .sub{color:var(--muted);font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+  .cico{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:12px;flex:none}
+  .search{width:100%;border:1px solid var(--line);background:var(--panel2);border-radius:14px;padding:11px 14px;font:inherit;font-size:14px;color:var(--text);outline:none;margin-bottom:8px}
+  .search:focus{border-color:var(--accent);background:#fff}
+  .alist{max-height:58vh;overflow-y:auto;margin:0 -4px;padding:0 4px}
+  .grp{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;padding:10px 12px 4px}
 
   .toast{position:absolute;left:50%;top:76px;transform:translateX(-50%) translateY(-20px);opacity:0;background:var(--text);color:#fff;
     padding:10px 16px;border-radius:999px;font-size:13px;font-weight:700;z-index:20;transition:.25s;white-space:nowrap;pointer-events:none;box-shadow:0 8px 24px rgba(0,0,0,.18)}
@@ -144,7 +150,7 @@
   <div class="list" id="list"></div>
 
   <div class="sheet-bg" id="sheetBg"></div>
-  <div class="sheet" id="sheet"><h3>Выберите актив</h3><div id="assetList"></div></div>
+  <div class="sheet" id="sheet"><h3>Выберите актив</h3><input class="search" id="assetSearch" placeholder="Поиск: BTC, SOL, TON…" autocomplete="off"><div id="assetList" class="alist"></div></div>
   <div class="toast" id="toast"></div>
 </div>
 
@@ -152,11 +158,22 @@
 (() => {
   // ---------- Config ----------
   // sym = пара на Binance (USDT ≈ USD). Золото — токен PAXG (1 PAXG = 1 унция).
+  // [тикер, цвет, примерная цена для симуляции]. Пара на Binance = тикер + USDT
+  const COINS = [
+    ['BTC','#f7931a',96500],['ETH','#627eea',3420],['BNB','#f3ba2f',640],['SOL','#9945ff',190],
+    ['XRP','#23292f',2.3],['DOGE','#c2a633',0.38],['ADA','#0033ad',0.9],['TRX','#eb0029',0.25],
+    ['TON','#0098ea',5.4],['AVAX','#e84142',38],['LINK','#2a5ada',18],['DOT','#e6007a',7],
+    ['LTC','#345d9d',100],['BCH','#8dc351',450],['SHIB','#ffa409',0.000022],['NEAR','#00c08b',5.5],
+    ['UNI','#ff007a',12],['APT','#06b6d4',10],['ARB','#28a0f0',0.8],['OP','#ff0420',2],
+    ['SUI','#4da2ff',3.5],['PEPE','#3c9a3c',0.00002],['ATOM','#2e3148',7],['FIL','#0090ff',5],
+    ['ETC','#328332',27],['XLM','#14b6e7',0.4],['ICP','#29abe2',10],['INJ','#00f2fe',25],
+    ['AAVE','#b6509e',300],['WIF','#c69c6d',2.5],
+  ];
+  const decFor = p => p>=100?2 : p>=1?3 : p>=0.01?5 : 8;
   const ASSETS = [
-    {id:'BTC', sym:'BTCUSDT',  name:'BTC/USD', color:'#f7931a', start:96500, vol:0.00035, dec:2, payout:0.85},
-    {id:'ETH', sym:'ETHUSDT',  name:'ETH/USD', color:'#627eea', start:3420,  vol:0.0004,  dec:2, payout:0.85},
-    {id:'EUR', sym:'EURUSDT',  name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:4, payout:0.82},
-    {id:'XAU', sym:'PAXGUSDT', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80},
+    ...COINS.map(([id,color,start])=>({id, sym:id+'USDT', name:id+'/USD', color, start, vol:0.0005, dec:decFor(start), payout:0.85, cat:'crypto'})),
+    {id:'EUR', sym:'EURUSDT',  name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:4, payout:0.82, cat:'fx'},
+    {id:'XAU', sym:'PAXGUSDT', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80, cat:'fx'},
   ];
   const REST = 'https://data-api.binance.vision/api/v3/klines';
   const WS   = 'wss://data-stream.binance.vision/stream?streams=';
@@ -308,7 +325,7 @@
     $('src').className = 'src '+(live?'on':'');
   }
   async function loadHistory(){
-    await Promise.all(ASSETS.map(async a=>{
+    const res = await Promise.allSettled(ASSETS.map(async a=>{
       const r = await fetch(`${REST}?symbol=${a.sym}&interval=1s&limit=${HISTORY_POINTS}`);
       if(!r.ok) throw new Error('http '+r.status);
       const k = await r.json();
@@ -317,11 +334,14 @@
       S.series[a.id] = arr.flatMap(o=>[o,{t:o.t,p:o.p}]).slice(-HISTORY_POINTS);
       S.livePrice[a.id] = arr[arr.length-1].p;
       a.start = arr[arr.length-1].p; // чтобы при потере связи симуляция шла от реальной цены
+      if(a.cat==='crypto') a.dec = decFor(a.start);
+      a.live = true;
     }));
+    if(!res.some(r=>r.status==='fulfilled')) throw new Error('no data');
   }
   let ws, retry=0;
   function connectWS(){
-    const streams = ASSETS.map(a=>a.sym.toLowerCase()+'@aggTrade').join('/');
+    const streams = ASSETS.filter(a=>a.live).map(a=>a.sym.toLowerCase()+'@aggTrade').join('/');
     ws = new WebSocket(WS+streams);
     const failTimer = setTimeout(()=>{ if(!S.live){ try{ws.close()}catch(e){} } }, 6000);
     ws.onmessage = e=>{
@@ -346,8 +366,8 @@
     if(S.live && Date.now()-S.lastMsg>10000) setSource(false);
     ASSETS.forEach(a=>{
       const arr=S.series[a.id], prev=arr[arr.length-1].p;
-      const p = (S.live && S.livePrice[a.id]) ? S.livePrice[a.id] : step(prev,a);
-      if(!S.live) S.livePrice[a.id]=p;
+      const p = (S.live && a.live && S.livePrice[a.id]) ? S.livePrice[a.id] : step(prev,a);
+      if(!(S.live && a.live)) S.livePrice[a.id]=p;
       arr.push({t:Date.now(),p}); if(arr.length>HISTORY_POINTS) arr.shift();
     });
     settle(); renderPrice(); renderList();
@@ -362,13 +382,22 @@
     S.tab=b.dataset.tab; document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('on',x===b)); renderList();
   });
   function openSheet(o){ $('sheet').classList.toggle('open',o); $('sheetBg').style.display=o?'block':'none'; }
-  $('assetBtn').onclick=()=>{
-    $('assetList').innerHTML=ASSETS.map(a=>`<div class="opt ${a===S.asset?'on':''}" data-id="${a.id}">
-      <span class="ico" style="width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:${a.color};font-weight:700;font-size:12px">${a.id[0]}</span>
-      <span class="n">${a.name}<div style="color:var(--muted);font-size:12px;font-weight:400">${fmtP(last(a.id),a)}</div></span><span class="p">${Math.round(a.payout*100)}%</span></div>`).join('');
+  function renderAssetList(){
+    const q=$('assetSearch').value.trim().toLowerCase();
+    const items=ASSETS.filter(a=>!q || a.name.toLowerCase().includes(q));
+    const row=a=>{ const p=last(a.id), arr=S.series[a.id], d=(p-arr[0].p)/arr[0].p*100;
+      return `<div class="opt ${a===S.asset?'on':''}" data-id="${a.id}">
+      <span class="cico" style="background:${a.color}">${a.id.slice(0,a.id.length>3?2:1)}</span>
+      <span class="n">${a.name}<div class="sub">${fmtP(p,a)} <span class="${d>=0?'win':'lose'}">${d>=0?'+':''}${d.toFixed(2)}%</span></div></span>
+      <span class="p">${Math.round(a.payout*100)}%</span></div>`; };
+    const cr=items.filter(a=>a.cat==='crypto'), fx=items.filter(a=>a.cat==='fx');
+    $('assetList').innerHTML = (cr.length?'<div class="grp">Криптовалюты</div>'+cr.map(row).join(''):'')
+      + (fx.length?'<div class="grp">Валюты и металлы</div>'+fx.map(row).join(''):'')
+      || '<div class="empty">Ничего не найдено</div>';
     document.querySelectorAll('.opt').forEach(o=>o.onclick=()=>{ S.asset=ASSETS.find(a=>a.id===o.dataset.id); openSheet(false); renderTop(); renderPrice(); });
-    openSheet(true);
-  };
+  }
+  $('assetSearch').oninput=renderAssetList;
+  $('assetBtn').onclick=()=>{ $('assetSearch').value=''; renderAssetList(); openSheet(true); };
   $('sheetBg').onclick=()=>openSheet(false);
 
   // Telegram WebApp integration (works when opened inside Telegram)
