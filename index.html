@@ -38,6 +38,9 @@
   .price-row{padding:0 14px 6px;display:flex;align-items:baseline;gap:10px}
   .price{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
   .chg{font-size:13px;font-weight:600}
+  .src{margin-left:auto;font-size:11px;font-weight:700;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .src::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
+  .src.on{color:var(--up)} .src.on::before{background:var(--up);box-shadow:0 0 6px var(--up)}
 
   .chart-wrap{position:relative;margin:0 8px;height:300px;background:linear-gradient(#141821,#10141b);border-radius:14px;border:1px solid var(--line);overflow:hidden}
   canvas{width:100%;height:100%;display:block}
@@ -109,6 +112,7 @@
   <div class="price-row">
     <div class="price" id="price">—</div>
     <div class="chg" id="chg"></div>
+    <div class="src" id="src">Симуляция</div>
   </div>
 
   <div class="chart-wrap"><canvas id="chart"></canvas></div>
@@ -144,18 +148,22 @@
 <script>
 (() => {
   // ---------- Config ----------
+  // sym = пара на Binance (USDT ≈ USD). Золото — токен PAXG (1 PAXG = 1 унция).
   const ASSETS = [
-    {id:'BTC', name:'BTC/USD', color:'#f7931a', start:96500, vol:0.00035, dec:2, payout:0.85},
-    {id:'ETH', name:'ETH/USD', color:'#627eea', start:3420,  vol:0.0004,  dec:2, payout:0.85},
-    {id:'EUR', name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:5, payout:0.82},
-    {id:'XAU', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80},
+    {id:'BTC', sym:'BTCUSDT',  name:'BTC/USD', color:'#f7931a', start:96500, vol:0.00035, dec:2, payout:0.85},
+    {id:'ETH', sym:'ETHUSDT',  name:'ETH/USD', color:'#627eea', start:3420,  vol:0.0004,  dec:2, payout:0.85},
+    {id:'EUR', sym:'EURUSDT',  name:'EUR/USD', color:'#3d8bfd', start:1.0835,vol:0.00006, dec:4, payout:0.82},
+    {id:'XAU', sym:'PAXGUSDT', name:'GOLD',    color:'#d4af37', start:2650,  vol:0.00012, dec:2, payout:0.80},
   ];
+  const REST = 'https://data-api.binance.vision/api/v3/klines';
+  const WS   = 'wss://data-stream.binance.vision/stream?streams=';
   const AMOUNTS = [10,25,50,100,250,500,1000];
   const TIMES = [15,30,60,120,300];
   const TICK_MS = 500, HISTORY_POINTS = 240;
 
   // ---------- State ----------
-  const S = { balance:10000, asset:ASSETS[0], amountIdx:3, timeIdx:1, open:[], hist:[], tab:'open', series:{} };
+  const S = { balance:10000, asset:ASSETS[0], amountIdx:3, timeIdx:1, open:[], hist:[], tab:'open', series:{},
+              live:false, livePrice:{}, lastMsg:0 };
 
   // price simulation per asset (random walk with slight mean reversion)
   ASSETS.forEach(a => {
@@ -290,8 +298,55 @@
     });
     if(changed) renderTop();
   }
+  // ---------- Live data (Binance) ----------
+  function setSource(live){
+    S.live=live;
+    $('src').textContent = live ? 'Binance LIVE' : 'Симуляция';
+    $('src').className = 'src '+(live?'on':'');
+  }
+  async function loadHistory(){
+    await Promise.all(ASSETS.map(async a=>{
+      const r = await fetch(`${REST}?symbol=${a.sym}&interval=1s&limit=${HISTORY_POINTS}`);
+      if(!r.ok) throw new Error('http '+r.status);
+      const k = await r.json();
+      const arr = k.map(c=>({t:c[6], p:+c[4]}));
+      // растягиваем 1-секундные свечи до шага графика (0.5с)
+      S.series[a.id] = arr.flatMap(o=>[o,{t:o.t,p:o.p}]).slice(-HISTORY_POINTS);
+      S.livePrice[a.id] = arr[arr.length-1].p;
+      a.start = arr[arr.length-1].p; // чтобы при потере связи симуляция шла от реальной цены
+    }));
+  }
+  let ws, retry=0;
+  function connectWS(){
+    const streams = ASSETS.map(a=>a.sym.toLowerCase()+'@aggTrade').join('/');
+    ws = new WebSocket(WS+streams);
+    const failTimer = setTimeout(()=>{ if(!S.live){ try{ws.close()}catch(e){} } }, 6000);
+    ws.onmessage = e=>{
+      const m = JSON.parse(e.data), d = m.data; if(!d) return;
+      const a = ASSETS.find(x=>x.sym===d.s); if(!a) return;
+      S.livePrice[a.id] = +d.p; S.lastMsg = Date.now();
+      if(!S.live){ clearTimeout(failTimer); setSource(true); retry=0; }
+    };
+    ws.onclose = ws.onerror = ()=>{
+      clearTimeout(failTimer);
+      if(S.live){ setSource(false); }
+      if(retry++ < 5) setTimeout(connectWS, 3000*retry);   // переподключение
+    };
+  }
+  async function startLive(){
+    try{ await loadHistory(); renderPrice(); } catch(e){ /* нет доступа — остаёмся на симуляции */ return; }
+    connectWS();
+  }
+
   function tick(){
-    ASSETS.forEach(a=>{ const arr=S.series[a.id]; arr.push({t:Date.now(),p:step(arr[arr.length-1].p,a)}); if(arr.length>HISTORY_POINTS) arr.shift(); });
+    // если поток молчит дольше 10с — считаем, что связь пропала
+    if(S.live && Date.now()-S.lastMsg>10000) setSource(false);
+    ASSETS.forEach(a=>{
+      const arr=S.series[a.id], prev=arr[arr.length-1].p;
+      const p = (S.live && S.livePrice[a.id]) ? S.livePrice[a.id] : step(prev,a);
+      if(!S.live) S.livePrice[a.id]=p;
+      arr.push({t:Date.now(),p}); if(arr.length>HISTORY_POINTS) arr.shift();
+    });
     settle(); renderPrice(); renderList();
   }
 
@@ -317,8 +372,9 @@
   try{ const tg=window.Telegram?.WebApp; if(tg){ tg.ready(); tg.expand(); } }catch(e){}
 
   // ---------- Start ----------
-  resize(); renderTop(); renderPrice(); renderList(); loop();
+  resize(); setSource(false); renderTop(); renderPrice(); renderList(); loop();
   setInterval(tick,TICK_MS);
+  startLive();
 })();
 </script>
 </body>
